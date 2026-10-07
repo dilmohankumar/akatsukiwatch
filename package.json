@@ -1,0 +1,13 @@
+{
+  "name": "opswatch",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Public multi-provider monitoring dashboard (Cloudflare, MongoDB, EC2, Payments, Domains, Docker/Logs)",
+  "scripts": {
+    "install:all": "npm i && npm --prefix server i && npm --prefix client i",
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "build": "npm --prefix client run build",
+    "start": "npm --prefix server start"
+  },
+  "devDependencies": { "concurrently": "^9.0.0" }
+}

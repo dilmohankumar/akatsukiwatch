@@ -1,0 +1,7 @@
+services:
+  akatsukiwatch:
+    build: .
+    ports: ["4100:4100"]
+    environment:
+      DATA_MODE: demo   # switch to "live" once provider adapters are implemented
+    restart: unless-stopped
