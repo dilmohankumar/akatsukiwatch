@@ -9,7 +9,7 @@ export function bytes(n) {
     v /= 1000;
     i++;
   }
-  const shown = v >= 100 || i === 0 ? v.toFixed(0) : String(+v.toFixed(2)); // 15.18 MB, 3.8 MB, 172 kB
+  const shown = i === 0 ? v.toFixed(0) : String(+v.toFixed(2)); // 429.08 kB, 15.18 MB, 3.8 MB, 172 B
   return `${n < 0 ? '-' : ''}${shown} ${u[i]}`;
 }
 
@@ -21,9 +21,10 @@ export function compact(n) {
 export function count(n) {
   const a = Math.abs(n);
   if (a < 1000) return nf.format(Math.round(n));
-  if (a < 1e6) return `${(n / 1e3).toFixed(2)}k`;
-  if (a < 1e9) return `${(n / 1e6).toFixed(2)}M`;
-  return `${(n / 1e9).toFixed(2)}B`;
+  const t = (x) => String(+x.toFixed(2));
+  if (a < 1e6) return `${t(n / 1e3)}k`;
+  if (a < 1e9) return `${t(n / 1e6)}M`;
+  return `${t(n / 1e9)}B`;
 }
 
 export function ago(ts) {
@@ -41,6 +42,7 @@ export function fmt(kind, v) {
     case 'bytes': return bytes(v);
     case 'pct': return `${(+v).toFixed(2)}%`;
     case 'count': return count(v);
+    case 'qps': return `${(+v).toFixed(2)}/s`;
     case 'ms': return `${Math.round(v)} ms`;
     case 'sec': return `${(+v).toFixed(1)} s`;
     case 'usd': return v >= 10000 ? `$${compact(v)}` : `$${nf.format(+(+v).toFixed(2))}`;
@@ -57,5 +59,8 @@ export function tick(range, t) {
 }
 
 export function fullTime(t) {
-  return new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  const d = new Date(t);
+  const date = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  return `${date}, ${time}`;
 }

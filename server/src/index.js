@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { providers, getProvider, load } from './providers/index.js';
-import { RANGES } from './lib/mock.js';
+import { windowOf, parseFilters } from './providers/cfCore.js';
 import * as logs from './logs.js';
 
 const app = express();
@@ -20,7 +20,7 @@ const credsOf = (req) => {
     return {};
   }
 };
-const rangeOf = (req) => (RANGES[req.query.range] ? req.query.range : '24h');
+const winOf = (req) => windowOf(req.query);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, mode: process.env.DATA_MODE || 'auto' }));
 
@@ -30,8 +30,26 @@ app.get('/api/dashboard/:id', async (req, res) => {
   const p = getProvider(req.params.id);
   if (!p) return res.status(404).json({ error: 'unknown provider' });
   const creds = credsOf(req);
-  const data = await load(p, rangeOf(req), creds[p.meta.id]);
-  res.json({ meta: p.meta, range: rangeOf(req), generatedAt: Date.now(), ...data });
+  try {
+    if (req.query.filters) parseFilters(req.query.filters); // reject bad filters with a clear message
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+  const win = winOf(req);
+  const data = await load(p, win, creds[p.meta.id], { tab: req.query.tab, filters: req.query.filters, groups: req.query.groups });
+  res.json({ meta: p.meta, range: win.key, window: { start: win.start, end: win.end }, tab: req.query.tab || null, generatedAt: Date.now(), ...data });
+});
+
+// Autocomplete values for the filter form.
+app.get('/api/suggest/:id', async (req, res) => {
+  const p = getProvider(req.params.id);
+  if (!p?.suggest) return res.status(404).json({ error: 'no suggestions for this integration' });
+  try {
+    const values = await p.suggest(winOf(req), credsOf(req)[p.meta.id], { field: String(req.query.field || ''), q: String(req.query.q || '') });
+    res.json({ values });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // Cross-provider summary for the Overview page.
@@ -41,7 +59,7 @@ app.get('/api/overview', async (req, res) => {
   const creds = credsOf(req);
   const out = await Promise.all(
     list.map(async (p) => {
-      const d = await load(p, rangeOf(req), creds[p.meta.id]);
+      const d = await load(p, winOf(req), creds[p.meta.id]);
       return { id: p.meta.id, name: p.meta.name, icon: p.meta.icon, source: d.source, health: d.health, kpis: d.kpis.slice(0, 3), alerts: d.alerts.map((a) => ({ ...a, source: p.meta.name })) };
     }),
   );

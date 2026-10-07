@@ -4,6 +4,7 @@ import * as ec2 from './ec2.js';
 import * as payments from './payments.js';
 import * as domains from './domains.js';
 import * as docker from './docker.js';
+import { legacyRange } from './cfCore.js';
 
 // Every provider exposes: meta, dashboard(range, creds), and optionally live(range, creds).
 // `live` is the seam where real API integrations plug in later; until a provider
@@ -11,13 +12,18 @@ import * as docker from './docker.js';
 export const providers = [cloudflare, mongodb, ec2, payments, domains, docker];
 export const getProvider = (id) => providers.find((p) => p.meta.id === id);
 
-export async function load(provider, range, creds) {
+export async function load(provider, win, creds, opts = {}) {
+  const { tab } = opts;
   if (process.env.DATA_MODE !== 'demo' && provider.live && creds && Object.keys(creds).length) {
     try {
-      return { ...(await provider.live(range, creds)), source: 'live' };
+      return { ...(await provider.live(win, creds, opts)), source: 'live' };
     } catch (e) {
-      return { ...(await provider.dashboard(range)), source: 'demo', liveError: e.message };
+      return { ...(await provider.dashboard(legacyRange(win))), source: 'demo', liveError: e.message };
     }
   }
-  return { ...(await provider.dashboard(range)), source: 'demo' };
+  if (tab && tab !== provider.meta.tabs?.[0]?.id) {
+    // Only the first tab has demo data; the others need a real connection (no made-up numbers).
+    return { health: null, kpis: [], alerts: [], source: 'demo', widgets: [{ id: 'need-live', type: 'notice', title: `${provider.meta.name} · ${tab}`, span: 12, text: 'This tab shows live data only. Connect your account on the Integrations page to see it.' }] };
+  }
+  return { ...(await provider.dashboard(legacyRange(win))), source: 'demo' };
 }

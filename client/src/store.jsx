@@ -17,19 +17,20 @@ const write = (k, v) => {
 };
 
 export const loadCreds = () => read('opswatch.creds', {});
+// The selected time range lives in localStorage so api.js can read it at call time.
+export const loadRange = () => ({ range: read('opswatch.range', '24h'), custom: read('opswatch.custom', null) });
 const ALL = ['cloudflare', 'mongodb', 'ec2', 'payments', 'domains', 'docker'];
 
 const Ctx = createContext(null);
 export const useSettings = () => useContext(Ctx);
 
 export function SettingsProvider({ children }) {
-  const [range, setRange] = useState(() => read('opswatch.range', '24h'));
+  const [sel, setSel] = useState(loadRange);
   const [auto, setAuto] = useState(() => read('opswatch.auto', true));
   const [theme, setTheme] = useState(() => read('opswatch.theme', 'system'));
   const [enabled, setEnabled] = useState(() => read('opswatch.enabled', ALL));
   const [creds, setCreds] = useState(loadCreds);
 
-  useEffect(() => write('opswatch.range', range), [range]);
   useEffect(() => write('opswatch.auto', auto), [auto]);
   useEffect(() => write('opswatch.enabled', enabled), [enabled]);
   useEffect(() => {
@@ -48,7 +49,16 @@ export function SettingsProvider({ children }) {
     });
   }, []);
 
+  // Written synchronously: the data hooks fetch in an effect right after this state change.
+  const setRangeSel = useCallback((range, custom = null) => {
+    write('opswatch.range', range);
+    write('opswatch.custom', custom);
+    setSel({ range, custom });
+  }, []);
+  const range = sel.range;
+  const rangeKey = range === 'custom' ? `custom:${sel.custom?.from}-${sel.custom?.to}` : range;
+
   const toggle = (id) => setEnabled((e) => (e.includes(id) ? e.filter((x) => x !== id) : [...e, id]));
 
-  return <Ctx.Provider value={{ range, setRange, auto, setAuto, theme, setTheme, enabled, toggle, creds, saveCreds }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ range, custom: sel.custom, rangeKey, setRangeSel, auto, setAuto, theme, setTheme, enabled, toggle, creds, saveCreds }}>{children}</Ctx.Provider>;
 }

@@ -8,9 +8,9 @@ import Icon from '../components/Icon.jsx';
 const LABEL = { ok: 'Healthy', warn: 'Attention', crit: 'Critical' };
 
 export default function Overview() {
-  const { range, enabled } = useSettings();
+  const { rangeKey, enabled } = useSettings();
   const ids = enabled.join(',');
-  const { data, error } = useData(`ov:${ids}:${range}`, () => api.overview(enabled, range), [ids]);
+  const { data, error } = useData(`ov:${ids}:${rangeKey}`, () => api.overview(enabled), [ids]);
 
   if (error && !data) return <div className="banner bad">Failed to load overview: {String(error.message)}</div>;
   if (!data) return <div className="loading">Loading overview…</div>;

@@ -6,23 +6,17 @@ import Icon from './components/Icon.jsx';
 import Overview from './pages/Overview.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Connect from './pages/Connect.jsx';
-
-const RANGES = ['1h', '6h', '24h', '7d', '30d'];
+import DateRange from './components/DateRange.jsx';
 
 function Topbar() {
-  const { range, setRange, auto, setAuto, theme, setTheme } = useSettings();
+  const { auto, setAuto, theme, setTheme } = useSettings();
   const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   return (
     <header className="topbar">
-      <div className="seg" role="tablist" aria-label="Time range">
-        {RANGES.map((r) => (
-          <button key={r} className={range === r ? 'on' : ''} onClick={() => setRange(r)}>{r}</button>
-        ))}
-      </div>
-      <label className="toggle">
-        <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-        <span /> Auto-refresh 15s
-      </label>
+      <DateRange />
+      <button className={`btn live-btn ${auto ? 'on' : ''}`} onClick={() => setAuto(!auto)} aria-pressed={auto} title={auto ? 'Live: refreshing every 15 seconds. Click to pause.' : 'Paused. Click to refresh every 15 seconds.'}>
+        <span className="live-dot" aria-hidden /> Live
+      </button>
       <button className="btn icon" onClick={() => setTheme(dark ? 'light' : 'dark')} aria-label="Toggle theme" title="Toggle theme">
         <Icon name={dark ? 'sun' : 'moon'} />
       </button>
