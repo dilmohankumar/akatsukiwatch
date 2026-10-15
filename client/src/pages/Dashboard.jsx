@@ -1,3 +1,4 @@
+import Loader from '../components/Loader.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
@@ -145,7 +146,7 @@ export default function Dashboard({ providers }) {
       {error && data && <div className="banner bad">{String(error.message)}</div>}
 
       {!ready ? (
-        <Skeleton />
+        <Loader label={`Loading ${meta?.name || id}`} />
       ) : (
         <>
           {data.liveError && <div className="banner bad">Couldn’t load live data. Reason: {data.liveError}</div>}

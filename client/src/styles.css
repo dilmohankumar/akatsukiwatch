@@ -388,3 +388,11 @@ h2.sect { font-size: 16px; margin: 12px 0 -4px; letter-spacing: -0.01em; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --baingani: #b48be6; } }
 :root[data-theme="dark"] { --baingani: #b48be6; }
 .theme-ec2 .kpi-v, .theme-ec2 .legend b, .theme-ec2 .top b, .theme-ec2 .tbl td.num, .theme-ec2 .tip b { color: var(--baingani); }
+/* Sharingan loader */
+.eye-loader { display: flex; align-items: center; justify-content: center; width: 100%; min-height: calc(100vh - 140px); padding: 0; }
+.eye { width: min(190px, 55vw); height: auto; overflow: visible;  }
+.eye-spin { transform-origin: 150px 100px; animation: eye-spin 2.2s cubic-bezier(.55, .1, .35, .95) infinite; }
+.eye-blink { transform-origin: 150px 100px; animation: eye-blink 5s ease-in-out infinite; }
+@keyframes eye-spin { to { transform: rotate(360deg); } }
+@keyframes eye-blink { 0%, 90%, 100% { transform: scaleY(1); } 94% { transform: scaleY(.04); } }
+@media (prefers-reduced-motion: reduce) { .eye, .eye-spin, .eye-blink { animation-duration: 8s; } }

@@ -5,6 +5,7 @@ import { useSettings } from '../store.jsx';
 import { useData } from '../useData.js';
 import Icon from '../components/Icon.jsx';
 import LiveLogs from '../components/LiveLogs.jsx';
+import Loader from '../components/Loader.jsx';
 
 const LABEL = { ok: 'Healthy', warn: 'Attention', crit: 'Critical' };
 
@@ -14,7 +15,7 @@ export default function Overview() {
   const { data, error } = useData(`ov:${ids}:${rangeKey}`, () => api.overview(enabled), [ids]);
 
   if (error && !data) return <div className="banner bad">Failed to load overview: {String(error.message)}</div>;
-  if (!data) return <div className="loading">Loading dashboard…</div>;
+  if (!data) return <Loader label="Loading dashboard" />;
 
   const lc = data.logCounts;
 
