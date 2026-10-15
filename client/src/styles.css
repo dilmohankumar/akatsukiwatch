@@ -371,7 +371,7 @@ h2.sect { font-size: 16px; margin: 12px 0 -4px; letter-spacing: -0.01em; }
 /* Dashboard cards: each provider's numbers in its own colour */
 .tile-cloudflare .tile-k b { color: #f6821f; }
 .tile-mongodb .tile-k b { color: #13aa52; }
-.tile-ec2 .tile-k b { color: #8c4fff; }
+.tile-ec2 .tile-k b { color: var(--baingani); }
 .tile-payments .tile-k b { color: #635bff; }
 .tile-domains .tile-k b { color: #0f9d9a; }
 .tile-docker .tile-k b { color: #2496ed; }
@@ -383,3 +383,8 @@ h2.sect { font-size: 16px; margin: 12px 0 -4px; letter-spacing: -0.01em; }
 .docs .muted { flex: 0 0 auto; }
 .docs pre { flex: 0 0 auto; white-space: pre; color: var(--text); margin: 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow: auto; }
 .nested { margin: 4px 0 4px 18px; padding-left: 12px; border-left: 2px solid var(--border); }
+/* AWS EC2: dark baingani (brinjal purple); lighter in dark mode so it stays readable */
+:root { --baingani: #3b1257; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --baingani: #b48be6; } }
+:root[data-theme="dark"] { --baingani: #b48be6; }
+.theme-ec2 .kpi-v, .theme-ec2 .legend b, .theme-ec2 .top b, .theme-ec2 .tbl td.num, .theme-ec2 .tip b { color: var(--baingani); }

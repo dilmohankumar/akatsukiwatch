@@ -93,7 +93,7 @@ function Table({ widget }) {
                   {widget.columns.map((c) => {
                     const v = r[c.key];
                     if (c.fmt === 'status') return <td key={c.key}><Status value={v} /></td>;
-                    if (c.fmt === 'days') return <td key={c.key} className={v < 14 ? 'bad-t' : v < 30 ? 'warn-t' : ''}>{v} d</td>;
+                    if (c.fmt === 'days') return <td key={c.key} className={v == null ? '' : v < 14 ? 'bad-t' : v < 30 ? 'warn-t' : ''}>{v == null ? '—' : `${v} d`}</td>;
                     return <td key={c.key} className={c.fmt ? 'num' : ''}>{c.fmt ? fmt(c.fmt, v) : v}</td>;
                   })}
                 </tr>

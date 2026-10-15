@@ -1,6 +1,6 @@
-const OK = ['running', 'succeeded', 'paid', 'on', 'locked', 'ok', 'success', '2/2 passed'];
+const OK = ['up', 'running', 'succeeded', 'paid', 'on', 'locked', 'ok', 'success', '2/2 passed'];
 const WARN = ['warning', 'warn', 'pending', 'unlocked', 'off'];
-const BAD = ['failed', 'error', 'stopped', 'disputed', 'crit'];
+const BAD = ['down', 'failed', 'error', 'stopped', 'disputed', 'crit'];
 
 export default function Status({ value }) {
   const v = String(value).toLowerCase();
