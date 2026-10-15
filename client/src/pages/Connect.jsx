@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { api } from '../api.js';
 import { useSettings } from '../store.jsx';
 import Icon from '../components/Icon.jsx';
 
@@ -9,15 +8,13 @@ function Card({ p }) {
   const [open, setOpen] = useState(false);
   const [vals, setVals] = useState(saved || {});
   const [msg, setMsg] = useState(null);
-  const [busy, setBusy] = useState(false);
 
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault();
-    setBusy(true);
-    const r = await api.test(p.id, vals).catch((err) => ({ ok: false, message: err.message }));
-    if (r.ok) saveCreds(p.id, vals);
-    setMsg(r);
-    setBusy(false);
+    const missing = p.credentialFields.filter((f) => !String(vals[f.key] || '').trim()).map((f) => f.label);
+    if (missing.length) return setMsg({ ok: false, message: `Missing: ${missing.join(', ')}` });
+    saveCreds(p.id, Object.fromEntries(Object.entries(vals).map(([k, v]) => [k, String(v).trim()])));
+    setMsg({ ok: true, message: 'Saved.' });
   };
 
   return (
@@ -37,7 +34,7 @@ function Card({ p }) {
       </details>
 
       <div className="conn-f">
-        <span className={`pill ${saved ? 'ok' : 'neutral'}`}>{saved ? 'Credentials saved (this browser)' : 'Using demo data'}</span>
+        <span className={`pill ${saved ? 'ok' : 'neutral'}`}>{saved ? 'Credentials saved (this browser)' : 'Not connected'}</span>
         <button className="btn sm" onClick={() => setOpen((o) => !o)}>{open ? 'Close' : saved ? 'Edit credentials' : 'Connect'}</button>
       </div>
 
@@ -50,7 +47,7 @@ function Card({ p }) {
             </label>
           ))}
           <div className="form-a">
-            <button className="btn primary" disabled={busy}>{busy ? 'Testing…' : 'Save & test'}</button>
+            <button className="btn primary">Save</button>
             {saved && <button type="button" className="btn" onClick={() => { saveCreds(p.id, null); setVals({}); setMsg(null); }}>Remove</button>}
           </div>
           {msg && <div className={`banner ${msg.ok ? '' : 'bad'}`}>{msg.message}</div>}
@@ -66,7 +63,7 @@ export default function Connect({ providers }) {
       <div className="page-h">
         <div>
           <h1>Integrations</h1>
-          <p>Pick what you want to monitor and bring your own credentials. Everything works with demo data until live APIs are enabled.</p>
+          <p>Pick what you want to monitor and bring your own credentials. Connect an account to see its live data.</p>
         </div>
       </div>
       <div className="banner">

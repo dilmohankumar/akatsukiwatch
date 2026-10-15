@@ -14,7 +14,14 @@ const PRESETS = [
   ['30d', 'Last 30 days'],
 ];
 const MAX_DAYS = 31;
-const UNIT = { m: 60e3, min: 60e3, mins: 60e3, minute: 60e3, minutes: 60e3, h: 3600e3, hr: 3600e3, hrs: 3600e3, hour: 3600e3, hours: 3600e3, d: 864e5, day: 864e5, days: 864e5, w: 7 * 864e5, week: 7 * 864e5, weeks: 7 * 864e5 };
+const MIN = 60e3;
+const UNIT = [
+  [/^(m|min|mins|minute|minutes)$/, MIN],
+  [/^(h|hr|hrs|hour|hours)$/, 60 * MIN],
+  [/^(d|day|days)$/, 24 * 60 * MIN],
+  [/^(w|wk|wks|week|weeks)$/, 7 * 24 * 60 * MIN],
+  [/^(mo|mos|month|months)$/, 30 * 24 * 60 * MIN],
+];
 
 const pad = (n) => String(n).padStart(2, '0');
 const toText = (ms) => {
@@ -31,11 +38,15 @@ const short = (ms) => new Date(ms).toLocaleString('en-GB', { day: 'numeric', mon
 const startOfDay = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const endOfDay = (ms) => { const d = new Date(ms); d.setHours(23, 59, 0, 0); return Math.min(d.getTime(), Date.now()); };
 
-/** "3h", "3 hours", "45m", "2 days" -> milliseconds, or null. */
+/** "3h", "3 hours", "45 min", "last 2 days", "1.5h" -> milliseconds, or null. Seconds are rounded up to a minute. */
 function parseDuration(text) {
-  const m = /^(\d+(?:\.\d+)?)\s*([a-z]+)$/i.exec(text.trim());
-  const unit = m && UNIT[m[2].toLowerCase()];
-  return unit ? Math.round(+m[1] * unit) : null;
+  const t = text.trim().toLowerCase().replace(/^(last|past|previous)\s+/, '').replace(/,/g, '.');
+  const m = /^(\d+(?:\.\d+)?)\s*([a-z]+)$/.exec(t);
+  if (!m) return null;
+  const n = +m[1];
+  if (/^(s|sec|secs|second|seconds)$/.test(m[2])) return Math.max(MIN, Math.round(n * 1000));
+  const u = UNIT.find(([re]) => re.test(m[2]));
+  return u && n > 0 ? Math.round(n * u[1]) : null;
 }
 
 function Calendar({ month, setMonth, from, to, onPick }) {
@@ -118,8 +129,10 @@ export default function DateRange() {
 
   const onText = (e) => {
     e.preventDefault();
+    if (!text.trim()) return;
     const ms = parseDuration(text);
-    if (!ms) return setErr('Try 3h, 45m, 2d or 1w');
+    if (!ms) return setErr(/^\d+$/.test(text.trim()) ? 'Add a unit, e.g. 3h, 45m, 2d' : 'Try 3h, 3 hours, 45 min, 2 days or 1 week');
+    if (ms > MAX_DAYS * 864e5) return setErr(`Pick at most ${MAX_DAYS} days`);
     const now = Date.now();
     apply(now - ms, now);
   };
@@ -160,6 +173,7 @@ export default function DateRange() {
         <div className="dr-pop" role="dialog" aria-label="Select time range">
           <form onSubmit={onText}>
             <input className="dr-text" value={text} onChange={(e) => { setText(e.target.value); setErr(''); }} placeholder="Custom range: 3h, 3 hours, 3 m…" aria-label="Custom range" autoFocus />
+            {err && <div className="dr-err top" role="alert">{err}</div>}
           </form>
           <div className="dr-body">
             <Calendar month={month} setMonth={setMonth} from={draft.from} to={draft.to} onPick={pick} />
@@ -175,8 +189,7 @@ export default function DateRange() {
             <label>Start<input value={startText} onChange={(e) => { setStartText(e.target.value); setErr(''); }} placeholder="YYYY-MM-DD HH:mm" /></label>
             <label>End<input value={endText} onChange={(e) => { setEndText(e.target.value); setErr(''); }} placeholder="YYYY-MM-DD HH:mm" /></label>
           </div>
-          {err && <div className="dr-err" role="alert">{err}</div>}
-          <div className="dr-act"><button type="button" className="btn primary" onClick={submit}>Apply</button></div>
+                  <div className="dr-act"><button type="button" className="btn primary" onClick={submit}>Apply</button></div>
         </div>
       )}
     </div>

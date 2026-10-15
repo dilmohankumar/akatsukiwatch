@@ -5,7 +5,7 @@ import Status from './Status.jsx';
 const FILTERS = ['all', 'success', 'warning', 'error'];
 const MAX = 200;
 
-export default function LiveLogs() {
+export default function LiveLogs({ compact = false }) {
   const [events, setEvents] = useState([]);
   const [filter, setFilter] = useState('all');
   const [paused, setPaused] = useState(false);
@@ -58,7 +58,7 @@ export default function LiveLogs() {
         <span className={`live ${connected && !paused ? 'on' : ''}`}>{paused ? 'paused' : connected ? 'live' : 'reconnecting…'}</span>
         <button className="btn sm" onClick={() => (paused ? resume() : setPaused(true))}>{paused ? 'Resume' : 'Pause'}</button>
       </div>
-      <div className="logs" role="log" aria-live="off">
+      <div className={`logs${compact ? ' compact' : ''}`} role="log" aria-live="off">
         {shown.length === 0 && <div className="empty">No events yet…</div>}
         {shown.map((e) => (
           <div key={e.id} className={`log ${e.status}`}>

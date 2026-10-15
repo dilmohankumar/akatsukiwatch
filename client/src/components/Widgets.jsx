@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { api } from '../api.js';
 import { fmt } from '../format.js';
 import TimeChart from './Charts.jsx';
 import LiveLogs from './LiveLogs.jsx';
@@ -49,31 +50,105 @@ function TopList({ widget, filterApi }) {
   );
 }
 
+/** Latest documents of one collection, pretty-printed as JSON. */
+function Docs({ ns }) {
+  const [state, setState] = useState({ loading: true });
+  useEffect(() => {
+    let alive = true;
+    api.mongoDocs(ns).then((r) => alive && setState({ docs: r.docs, total: r.total })).catch((e) => alive && setState({ error: e.message }));
+    return () => { alive = false; };
+  }, [ns]);
+  if (state.loading) return <div className="muted">Loading documents…</div>;
+  if (state.error) return <div className="banner bad">{state.error}</div>;
+  if (!state.docs.length) return <div className="empty">This collection is empty</div>;
+  const capped = state.total > state.docs.length;
+  return (
+    <div className="docs">
+      <div className="muted small">
+        {capped ? `Showing the latest ${state.docs.length} of ${state.total} documents` : `All ${state.docs.length} documents`}, newest first. Fields that look like passwords or tokens are hidden.
+      </div>
+      <pre>{JSON.stringify(state.docs, null, 2)}</pre>
+    </div>
+  );
+}
+
 function Table({ widget }) {
+  const [open, setOpen] = useState(null);
+  const expand = widget.expandDocs || widget.expandChildren;
+  const cols = widget.columns.length + (expand ? 1 : 0);
   return (
     <div className="tbl-wrap">
       <table className="tbl">
         <thead>
-          <tr>{widget.columns.map((c) => <th key={c.key}>{c.label}</th>)}</tr>
+          <tr>{expand && <th />}{widget.columns.map((c) => <th key={c.key}>{c.label}</th>)}</tr>
         </thead>
         <tbody>
-          {widget.rows.map((r, i) => (
-            <tr key={i}>
-              {widget.columns.map((c) => {
-                const v = r[c.key];
-                if (c.fmt === 'status') return <td key={c.key}><Status value={v} /></td>;
-                if (c.fmt === 'days') return <td key={c.key} className={v < 14 ? 'bad-t' : v < 30 ? 'warn-t' : ''}>{v} d</td>;
-                return <td key={c.key}>{c.fmt ? fmt(c.fmt, v) : v}</td>;
-              })}
-            </tr>
-          ))}
+          {widget.rows.map((r, i) => {
+            const key = expand ? r[widget.columns[0].key] : i;
+            const isOpen = expand && open === key;
+            return (
+              <Fragment key={i}>
+                <tr className={expand ? 'clickable' : ''} onClick={expand ? () => setOpen(isOpen ? null : key) : undefined}>
+                  {expand && <td className="chev">{isOpen ? '▾' : '▸'}</td>}
+                  {widget.columns.map((c) => {
+                    const v = r[c.key];
+                    if (c.fmt === 'status') return <td key={c.key}><Status value={v} /></td>;
+                    if (c.fmt === 'days') return <td key={c.key} className={v < 14 ? 'bad-t' : v < 30 ? 'warn-t' : ''}>{v} d</td>;
+                    return <td key={c.key} className={c.fmt ? 'num' : ''}>{c.fmt ? fmt(c.fmt, v) : v}</td>;
+                  })}
+                </tr>
+                {isOpen && (
+                  <tr className="docs-row">
+                    <td colSpan={cols}>
+                      {widget.expandChildren
+                        ? (r.children?.length ? <div className="nested"><Table widget={{ columns: widget.childColumns, rows: r.children, expandDocs: true }} /></div> : <div className="empty">No collections</div>)
+                        : <Docs ns={key} />}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
   );
 }
 
-export default function Widget({ widget, range, onGroup, filterApi }) {
+/** The "⋯" menu in a chart's top-right corner: Interval -> Auto / 15 minutes / 1 hour / 1 day. */
+function IntervalMenu({ widget, onInterval }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const down = (e) => ref.current && !(e.composedPath ? e.composedPath().includes(ref.current) : ref.current.contains(e.target)) && setOpen(false);
+    const key = (e) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', down);
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('mousedown', down);
+      document.removeEventListener('keydown', key);
+    };
+  }, [open]);
+  return (
+    <div className="kebab" ref={ref}>
+      <button type="button" className="kebab-btn" aria-label={`${widget.title} options`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>⋯</button>
+      {open && (
+        <div className="kebab-menu" role="menu">
+          <div className="kebab-h">Interval</div>
+          {widget.intervalOptions.map((o) => (
+            <button key={o.id} type="button" role="menuitemradio" aria-checked={o.id === widget.interval} onClick={() => { onInterval?.(widget.id, o.id); setOpen(false); }}>
+              <span>{o.label}</span>
+              {o.id === widget.interval && <span aria-hidden>✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Widget({ widget, range, onGroup, onInterval, filterApi }) {
   const span = { gridColumn: `span ${widget.span || 6}` };
   if (widget.type === 'heading') return <h2 className="sect" style={span}>{widget.title}</h2>;
 
@@ -106,8 +181,9 @@ export default function Widget({ widget, range, onGroup, filterApi }) {
     );
   }
   return (
-    <section className="card" style={span}>
+    <section className={`card ${widget.intervalable ? 'has-kebab' : ''}`} style={span}>
       <h3>{widget.title}</h3>
+      {widget.intervalable && <IntervalMenu widget={widget} onInterval={onInterval} />}
       {body}
     </section>
   );

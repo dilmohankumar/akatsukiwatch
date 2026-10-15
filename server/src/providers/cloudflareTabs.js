@@ -3,10 +3,10 @@
 //   pageview       = HTML response with status 200
 //   mitigated      = securityAction != "unknown"
 //   cached         = cacheStatus in (hit, revalidated)
-//   to origin      = originResponseStatus != 0   (+ edge 522/523/524 counted as connection failures)
+//   to origin      = originResponseStatus != 0   (+ edge 520-527 counted as connection failures)
 //   served by orig = to origin and not revalidated; served by Cloudflare = everything else not mitigated
 import { kpi } from '../lib/mock.js';
-import { cache, checkCreds, run, tline, fragments, DG, parseFilters, parseGroups, GROUPS, GROUP_OPTIONS, groupColors, statusLabel, countryName, coloName, cap, litOf, FIELDS, staticSuggestions } from './cfCore.js';
+import { cache, checkCreds, run, tline, fragments, DG, parseFilters, parseGroups, GROUPS, GROUP_OPTIONS, groupColors, INTERVALS, INTERVAL_OPTIONS, tlineWith, parseIntervals, statusLabel, countryName, coloName, cap, litOf, FIELDS, staticSuggestions } from './cfCore.js';
 
 const change = (cur, prev) => (prev == null ? null : prev === 0 ? (cur > 0 ? 100 : null) : +(((cur - prev) / prev) * 100).toFixed(1));
 
@@ -48,7 +48,7 @@ const toplist = (rows, keyOf, valOf = (r) => r.count, n = 12) => {
 };
 
 const PRODUCT = { firewallManaged: 'Managed rules', bic: 'Browser integrity check', firewallCustom: 'Custom rules', firewallRateLimit: 'Rate limiting rules', rateLimit: 'Rate limiting rules', l7ddos: 'HTTP DDoS protection', waf: 'WAF', securityLevel: 'Security level', hot: 'Hotlink protection', uaBlock: 'User agent blocking', zoneLockdown: 'Zone lockdown', ip: 'IP access rules', unknown: 'Unknown' };
-const CACHED = ['hit', 'revalidated'];
+const CACHED = ['hit', 'stale', 'updating', 'revalidated'];
 const PV = ',edgeResponseContentTypeName:"html",edgeResponseStatus:200'; // a "pageview"
 const CACHE_LABEL = { hit: 'Hit', miss: 'Miss', dynamic: 'Dynamic', revalidated: 'Revalidated', none: 'None', unknown: 'None' };
 export const CACHE_COLORS = { Dynamic: 'var(--s1)', Miss: 'var(--s3)', None: 'var(--s4)', Hit: 'var(--s2)', Revalidated: 'var(--s5)', Expired: 'var(--muted)', Other: 'var(--muted)' };
@@ -89,6 +89,19 @@ async function maybeGroup(ctx, widget, opts) {
   if (!gid) return base;
   const gs = await groupedSeries(ctx, gid, opts);
   return { ...base, type: 'line', series: gs.series, data: gs.data, colors: gs.colors, filterField: GROUPS[gid].field, rawBy: gs.raws };
+}
+
+/** Rebuilds `build(tl2, rows)` at the interval picked in the chart's menu; too fine an interval for the range keeps Auto and says so. */
+async function withInterval(ctx, widget, build) {
+  const key = ctx.intervals[widget.id];
+  const base = { ...widget, intervalable: true, intervalOptions: INTERVAL_OPTIONS, interval: key || 'auto' };
+  if (!key) return base;
+  const [dim, step] = INTERVALS[key];
+  const { token, zone, tl, H } = ctx;
+  if ((tl.end - tl.start) / step > 1500) return { ...base, interval: 'auto', note: 'That interval is too fine for this time range, so Auto is shown.' };
+  const tl2 = tlineWith({ start: tl.start, end: tl.end }, dim, step);
+  const z = await run(token, zone, [H.HG('si', `${dim} edgeResponseStatus cacheStatus`, { limit: 10000, order: `${dim}_ASC`, sel: 'count' })], tl.start, tl.end);
+  return { ...base, ...build(tl2, z.si || []) };
 }
 
 const heading = (id, title) => ({ id, type: 'heading', title, span: 12 });
@@ -161,8 +174,8 @@ export const TABS = {
         widgets: [
           await maybeGroup(ctx, { id: 'req', type: 'line', title: 'Requests over time', span: 6, unit: 'count', ...req }, { metric: (r) => r.count }),
           await maybeGroup(ctx, { id: 'bw', type: 'line', title: 'Data transfer', span: 6, unit: 'bytes', ...bw }, { metric: bytesOf, order: 'sum_edgeResponseBytes_DESC' }),
-          { id: 'status', type: 'bars', title: 'Requests by status code', span: 6, unit: 'count', ...status },
-          { id: 'cache', type: 'bars', colors: CACHE_COLORS, title: 'Requests by cache status', span: 6, unit: 'count', ...cacheS },
+          await withInterval(ctx, { id: 'status', type: 'bars', title: 'Requests by status code', span: 6, unit: 'count', ...status }, (tl2, rows) => lines(tl2, rows, [2, 3, 4, 5].map((n) => ({ key: `${n}xx`, label: `${n}xx`, val: (r) => (cls(r) === n ? r.count : 0) })))),
+          await withInterval(ctx, { id: 'cache', type: 'bars', colors: CACHE_COLORS, title: 'Requests by cache status', span: 6, unit: 'count', ...cacheS }, (tl2, rows) => lines(tl2, rows, cacheKeys.map((k) => ({ key: k, label: k, val: cl(k) })))),
           { id: 'paths', type: 'toplist', title: 'Top paths', span: 6, unit: 'count', items: toplist(z.paths, (r) => r.dimensions.clientRequestPath) },
           { id: 'countries', type: 'toplist', title: 'Top countries', span: 6, unit: 'count', items: toplist(z.cc, (r) => countryName(r.dimensions.clientCountryName)) },
           { id: 'ips', type: 'toplist', title: 'Top client IPs', span: 6, unit: 'count', items: toplist(z.ips, (r) => r.dimensions.clientIP) },
@@ -319,8 +332,8 @@ export const TABS = {
       ];
     })(),
     bf: (tl, H) => {
-      const yes = ',cacheStatus_in:["hit","revalidated"]';
-      const no = ',cacheStatus_notin:["hit","revalidated"]';
+      const yes = ',cacheStatus_in:["hit","stale","updating","revalidated"]';
+      const no = ',cacheStatus_notin:["hit","stale","updating","revalidated"]';
       return [
         H.HG('cs', `${tl.dim} cacheStatus`, { limit: 10000, order: `${tl.dim}_ASC`, sel: 'count sum{edgeResponseBytes}' }),
         H.HG('cp', 'clientRequestPath', { extra: yes }),
@@ -343,7 +356,14 @@ export const TABS = {
       const label = (r) => cap(r.dimensions.cacheStatus);
       const ct = (r) => (!r.dimensions.edgeResponseContentTypeName || r.dimensions.edgeResponseContentTypeName === 'empty' ? 'Empty' : r.dimensions.edgeResponseContentTypeName);
       return {
-        sparks: { 'Cached requests': reqs.data.map((d) => d.cached), 'Uncached requests': reqs.data.map((d) => d.uncached) },
+        sparks: {
+          'Cache hit rate': reqs.data.map((d) => (d.cached + d.uncached ? (d.cached / (d.cached + d.uncached)) * 100 : 0)),
+          'Cached requests': reqs.data.map((d) => d.cached),
+          'Uncached requests': reqs.data.map((d) => d.uncached),
+          'Bandwidth from cache': bw.data.map((d) => d.cached),
+          'Total data transfer': bw.data.map((d) => d.cached + d.uncached),
+          'Bandwidth saved': bw.data.map((d) => (d.cached + d.uncached ? (d.cached / (d.cached + d.uncached)) * 100 : 0)),
+        },
         widgets: [
           { id: 'cs', type: 'bars', colors: CACHE_COLORS, title: 'Requests by cache status', span: 12, unit: 'count', ...pivot(tl, z.cs, label, (r) => r.count, 5) },
           { id: 'cu', type: 'bars', title: 'Cached vs uncached requests', span: 6, unit: 'count', ...reqs },
@@ -360,7 +380,7 @@ export const TABS = {
 
   origin: (() => {
     const toOrigin = (r) => r.dimensions.originResponseStatus !== 0;
-    const failedConn = (r) => !toOrigin(r) && [522, 523, 524].includes(r.dimensions.edgeResponseStatus);
+    const failedConn = (r) => !toOrigin(r) && [520, 521, 522, 523, 524, 525, 526, 527].includes(r.dimensions.edgeResponseStatus);
     const reached = (z) => sumBy(z.ko, toOrigin);
     const failed = (z) => sumBy(z.ko, failedConn);
     const reach = (z) => (reached(z) + failed(z) ? (reached(z) / (reached(z) + failed(z))) * 100 : 0);
@@ -371,14 +391,15 @@ export const TABS = {
         { label: 'Connection success', fmt: 'pct', good: 'up', val: reach },
         { label: 'Origin response (p50)', fmt: 'ms', good: 'down', val: (z) => num(z.kq[0]?.quantiles.originResponseDurationMsP50) },
         { label: 'Origin error rate', fmt: 'pct', good: 'down', val: (z) => (reached(z) ? (sumBy(z.ko, (r) => r.dimensions.originResponseStatus >= 500) / reached(z)) * 100 : 0) },
-        { label: 'Requests to origin', fmt: 'count', good: null, val: (z) => reached(z) + failed(z) },
-        { label: 'Origin data transfer', fmt: 'bytes', good: null, val: (z) => sumBy(z.ko, toOrigin, bytesOf) },
+        { label: 'Requests to origin', fmt: 'count', good: null, val: reached },
+        { label: 'Origin data transfer', fmt: 'bytes', good: null, val: (z) => sumBy(z.ko, (r) => toOrigin(r) || failedConn(r), bytesOf) },
       ],
       bf: (tl, H) => {
         const o = ',originResponseStatus_neq:0';
         return [
-          H.HG('ots', `${tl.dim} originResponseStatus edgeResponseStatus`, { limit: 10000, order: `${tl.dim}_ASC` }),
+          H.HG('ots', `${tl.dim} originResponseStatus edgeResponseStatus`, { limit: 10000, order: `${tl.dim}_ASC`, sel: 'count sum{edgeResponseBytes}' }),
           H.HA('bd', 'avg{originTcpHandshakeDurationMs originTlsHandshakeDurationMs originResponseHeaderReceiveDurationMs}', o),
+          H.HG('bdt', tl.dim, { limit: 10000, order: `${tl.dim}_ASC`, extra: o, sel: 'avg{originTcpHandshakeDurationMs originTlsHandshakeDurationMs originResponseHeaderReceiveDurationMs}' }),
           H.HG('pq', tl.dim, { limit: 10000, order: `${tl.dim}_ASC`, extra: o, sel: Q3 }),
           H.HG('op', 'clientRequestPath', { extra: o }),
           H.HG('os', 'originResponseStatus', { extra: o, limit: 10 }),
@@ -392,6 +413,9 @@ export const TABS = {
           { key: 'failed', label: 'Connection failed', val: (r) => (failedConn(r) ? r.count : 0) },
         ]);
         const toO = lines(tl, z.ots, [{ key: 'req', label: 'Requests', val: (r) => (toOrigin(r) ? r.count : 0) }]);
+        const e5 = lines(tl, z.ots, [{ key: 'e5', label: 'Origin 5xx', val: (r) => (toOrigin(r) && r.dimensions.originResponseStatus >= 500 ? r.count : 0) }]);
+        const ob = lines(tl, z.ots, [{ key: 'b', label: 'Origin data', val: (r) => (toOrigin(r) || failedConn(r) ? bytesOf(r) : 0) }]);
+        const reachPct = outcomes.data.map((d) => (d.reached + d.failed ? (d.reached / (d.reached + d.failed)) * 100 : 0));
         const cls = pivot(tl, (z.ots || []).filter(toOrigin), (r) => `${Math.floor(r.dimensions.originResponseStatus / 100)}xx`, (r) => r.count, 4);
         const q = lines(tl, z.pq, [
           { key: 'p50', label: 'p50', val: (r) => num(r.quantiles.originResponseDurationMsP50) },
@@ -399,16 +423,23 @@ export const TABS = {
           { key: 'p99', label: 'p99', val: (r) => num(r.quantiles.originResponseDurationMsP99) },
         ]);
         const bd = z.bd[0]?.avg || {};
+        const bdKeys = [['tcp', 'TCP handshake', 'originTcpHandshakeDurationMs'], ['tls', 'TLS handshake', 'originTlsHandshakeDurationMs'], ['wait', 'Response wait', 'originResponseHeaderReceiveDurationMs']];
+        const bdt = lines(tl, z.bdt, bdKeys.map(([key, label, f]) => ({ key, label, val: (r) => num(r.avg?.[f]) })));
+        const bdTotals = Object.fromEntries(bdKeys.map(([key, , f]) => [key, num(bd[f])]));
+        const qTotals = { p50: num(z.kq[0]?.quantiles.originResponseDurationMsP50), p95: num(z.kq[0]?.quantiles.originResponseDurationMsP95), p99: num(z.kq[0]?.quantiles.originResponseDurationMsP99) };
         return {
-          sparks: { 'Requests to origin': toO.data.map((d) => d.req), 'Origin response (p50)': q.data.map((d) => d.p50) },
+          sparks: {
+            'Origin reachability': reachPct,
+            'Connection success': reachPct,
+            'Origin response (p50)': q.data.map((d) => d.p50),
+            'Origin error rate': e5.data.map((d, i) => (outcomes.data[i].reached ? (d.e5 / outcomes.data[i].reached) * 100 : 0)),
+            'Requests to origin': toO.data.map((d) => d.req),
+            'Origin data transfer': ob.data.map((d) => d.b),
+          },
           widgets: [
             { id: 'ots', type: 'bars', title: 'Origin connection outcomes over time', span: 6, unit: 'count', ...outcomes },
-            { id: 'bd', type: 'toplist', title: 'Origin connection breakdown (average)', span: 6, unit: 'ms', items: [
-              { label: 'TCP handshake', value: num(bd.originTcpHandshakeDurationMs) },
-              { label: 'TLS handshake', value: num(bd.originTlsHandshakeDurationMs) },
-              { label: 'Response wait', value: num(bd.originResponseHeaderReceiveDurationMs) },
-            ] },
-            { id: 'pq', type: 'line', title: 'Origin response time percentiles', span: 6, unit: 'ms', ...q },
+            { id: 'bd', type: 'bars', title: 'Origin connection breakdown', span: 6, unit: 'ms', totals: bdTotals, ...bdt },
+            { id: 'pq', type: 'line', title: 'Origin response time percentiles', span: 6, unit: 'ms', totals: qTotals, ...q },
             { id: 'rto', type: 'line', title: 'Requests to origin over time', span: 6, unit: 'count', ...toO },
             { id: 'osc', type: 'bars', title: 'Origin status codes over time', span: 12, unit: 'count', ...cls },
             { id: 'op', type: 'toplist', title: 'Top paths by origin requests', span: 6, unit: 'count', items: toplist(z.op, (r) => r.dimensions.clientRequestPath) },
@@ -446,8 +477,8 @@ export const TABS = {
       ];
     })(),
     bf: (tl) => [
-      DG('qs', tl.dim, { limit: 10000, order: `${tl.dim}_ASC` }),
-      DG('rc', 'responseCode', { limit: 10 }),
+      DG('qs', `${tl.dim} responseCode`, { limit: 10000, order: `${tl.dim}_ASC`, sel: 'count avg{processingTimeUs}' }),
+      DG('rc', `${tl.dim} responseCode`, { limit: 10000, order: `${tl.dim}_ASC` }),
       DG('qt', 'queryType', { limit: 10 }),
       DG('pr', 'protocol', { limit: 10 }),
       DG('qn', 'queryName', { limit: 10 }),
@@ -459,12 +490,22 @@ export const TABS = {
     ],
     widgets: async (z, tl) => {
       const qs = lines(tl, z.qs, [{ key: 'q', label: 'Queries', val: (r) => r.count }]);
+      const ok = lines(tl, z.qs, [{ key: 'ok', label: 'NOERROR', val: (r) => (r.dimensions.responseCode === 'NOERROR' ? r.count : 0) }]);
+      const nx = lines(tl, z.qs, [{ key: 'nx', label: 'NXDOMAIN', val: (r) => (r.dimensions.responseCode === 'NXDOMAIN' ? r.count : 0) }]);
+      const ms = lines(tl, z.qs, [{ key: 'us', label: 'Processing', val: (r) => r.count * num(r.avg?.processingTimeUs) }]);
       const T = (alias, key, name = String) => toplist(z[alias], (r) => name(r.dimensions[key] ?? 'Unknown'));
+      const B = (alias, key, name = String) => pivot(tl, z[alias], (r) => name(r.dimensions[key] ?? 'Unknown'), (r) => r.count, 5);
       return {
-        sparks: { 'Total DNS queries': qs.data.map((d) => d.q) },
+        sparks: {
+          'Total DNS queries': qs.data.map((d) => d.q),
+          'Queries per second': qs.data.map((d) => d.q / (tl.step / 1000)),
+          'NOERROR responses': ok.data.map((d, i) => (qs.data[i].q ? (d.ok / qs.data[i].q) * 100 : 0)),
+          'NXDOMAIN responses': nx.data.map((d, i) => (qs.data[i].q ? (d.nx / qs.data[i].q) * 100 : 0)),
+          'Average processing time': ms.data.map((d, i) => (qs.data[i].q ? d.us / qs.data[i].q / 1000 : 0)),
+        },
         widgets: [
           { id: 'qs', type: 'line', title: 'DNS queries over time', span: 12, unit: 'count', ...qs },
-          { id: 'rc', type: 'toplist', title: 'Queries by response code', span: 6, unit: 'count', items: T('rc', 'responseCode') },
+          { id: 'rc', type: 'bars', title: 'Queries by response code', span: 6, unit: 'count', ...B('rc', 'responseCode') },
           { id: 'qt', type: 'toplist', title: 'Queries by record type', span: 6, unit: 'count', items: T('qt', 'queryType') },
           { id: 'pr', type: 'toplist', title: 'Queries by protocol', span: 6, unit: 'count', items: T('pr', 'protocol') },
           { id: 'ipv', type: 'toplist', title: 'Queries by IP version', span: 6, unit: 'count', items: T('ipv', 'ipVersion') },
@@ -542,10 +583,11 @@ export async function liveTab(tab, win, creds, opts = {}) {
   const { token, zone } = checkCreds(creds);
   const flt = def.noFilters ? { extra: '', key: '[]', list: [], noEyeball: false } : parseFilters(opts.filters); // throws a readable Error on bad input
   const groups = parseGroups(opts.groups);
+  const intervals = parseIntervals(opts.intervals);
   const H = fragments(flt.extra, flt.noEyeball);
   const tl = tline(win);
   const ck = `${zone}:${tab}:${win.key === 'custom' ? `${win.start}-${win.end}` : win.key}:${flt.key}`;
-  const rk = `${ck}:${JSON.stringify(groups)}`;
+  const rk = `${ck}:${JSON.stringify(groups)}:${JSON.stringify(intervals)}`;
   const hit = cache.get(rk);
   if (hit && Date.now() - hit.at < 30_000) return hit.result;
 
@@ -553,14 +595,14 @@ export async function liveTab(tab, win, creds, opts = {}) {
   const prev = await previous(token, zone, win, tl, def, H, ck);
   z.__windowMs = tl.windowMs;
   if (prev) prev.__windowMs = tl.windowMs;
-  const { widgets, sparks, meta } = await def.widgets(z, tl, { token, zone, tl, H, groups });
+  const { widgets, sparks, meta } = await def.widgets(z, tl, { token, zone, tl, H, groups, intervals });
   addHoverActions(tab, widgets, z);
   const kpis = def.kd.map((d) => {
     const v = d.val(z);
     const pv = prev ? d.val(prev) : null;
     return kpi(d.label, v, d.fmt, sparks[d.label] || null, { goodWhen: d.good, delta: pv == null ? null : change(v, pv) });
   });
-  const result = { health: meta?.health || null, kpis, widgets, alerts: meta?.alerts || [], filters: flt.list || [] };
+  const result = { health: meta?.health || null, kpis, widgets, alerts: [], filters: flt.list || [] };
   cacheSet(rk, { at: Date.now(), result });
   return result;
 }

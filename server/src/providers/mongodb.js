@@ -1,3 +1,4 @@
+import { MongoClient, BSON } from 'mongodb';
 import { timeline, series, split, rows, sum, avg, last, kpi, toplist, ago } from '../lib/mock.js';
 
 export const meta = {
@@ -15,12 +16,151 @@ export const meta = {
     'Unused / redundant indexes, Atlas alerts, backups',
   ],
   credentialFields: [
-    { key: 'publicKey', label: 'Atlas public key', type: 'text' },
-    { key: 'privateKey', label: 'Atlas private key', type: 'password' },
-    { key: 'projectId', label: 'Project (group) ID', type: 'text' },
+    { key: 'connectionString', label: 'Connection string (read-only user)', type: 'password' },
   ],
-  liveApi: 'Atlas Admin API v2 (measurements, performance advisor) or serverStatus via read-only user',
+  liveApi: 'serverStatus, listDatabases and collStats through a read-only database user',
 };
+
+const lastSample = new Map();
+
+/** Turns a driver error into a sentence that says what is wrong and what to fix. */
+function explain(e) {
+  const m = String(e?.message || e);
+  const tip = (t) => `${t} (${m.split('\n')[0].slice(0, 140)})`;
+  if (/bad auth|Authentication failed|AuthenticationFailed/i.test(m)) return tip('Wrong username or password in the connection string. Check the database user and its password.');
+  if (/ENOTFOUND|querySrv|EAI_AGAIN|getaddrinfo/i.test(m)) return tip('Cluster address not found. Check the host name in the connection string, and that this computer is online.');
+  if (/not authorized|Unauthorized|requires authentication|Command .* requires/i.test(m)) return tip('This database user is not allowed to read this data. Give it the "Only read any database" role in Atlas → Database Access.');
+  if (/Server selection timed out|ETIMEDOUT|ECONNREFUSED|ReplicaSetNoPrimary|connection .* closed/i.test(m)) return tip('Could not reach the cluster. Most likely this computer\'s IP is not allowed in Atlas → Network Access, or the cluster is paused or down.');
+  if (/tls|ssl|certificate/i.test(m)) return tip('Secure (TLS) connection failed. Check the connection string and your network/VPN.');
+  if (/Invalid (scheme|connection string)|must start with mongodb/i.test(m)) return tip('The connection string is not valid. Copy it again from Atlas → Connect → Drivers.');
+  return m;
+}
+// Small rates keep their decimals (0.07, 0.004) instead of rounding to 0.
+const dec = (v) => (v === 0 ? '0' : v < 0.01 ? v.toFixed(3) : v.toFixed(2));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Live numbers straight from the database; ops/sec come from two serverStatus samples 2s apart. */
+export async function live(win, creds) {
+  try {
+    return await liveRaw(win, creds);
+  } catch (e) {
+    throw new Error(explain(e));
+  }
+}
+
+async function liveRaw(win, creds) {
+  const uri = String(creds?.connectionString || '').trim();
+  if (!/^mongodb(\+srv)?:\/\/[^\s]+$/.test(uri)) throw new Error('Connection string must start with mongodb:// or mongodb+srv://');
+  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 8000, connectTimeoutMS: 8000, appName: 'analytics-dashboard', maxPoolSize: 1, serverMonitoringMode: 'poll' });
+  const OWN = 2; // with these options the driver holds exactly 2 sockets on the node it talks to (1 command, 1 monitor)
+  try {
+    await client.connect();
+    const admin = client.db('admin');
+    // Rates are measured against the previous load when it is recent (a longer window, like Atlas's own graph);
+    // otherwise from two samples 2s apart.
+    const now = Date.now();
+    const prev = lastSample.get(uri);
+    let s1 = prev && now - prev.at >= 2000 && now - prev.at <= 600e3 ? prev.s : null;
+    if (!s1) {
+      s1 = await admin.command({ serverStatus: 1 });
+      await sleep(2000);
+    }
+    const s2 = await admin.command({ serverStatus: 1 });
+    lastSample.set(uri, { at: Date.now(), s: s2 });
+    const dt = Math.max((s2.uptimeMillis - s1.uptimeMillis) / 1000, 0.001);
+    const opKeys = ['insert', 'query', 'update', 'delete', 'getmore', 'command'];
+    const rate = (k) => (s2.uptimeMillis < s1.uptimeMillis ? 0 : Math.max(0, ((s2.opcounters?.[k] || 0) - (s1.opcounters?.[k] || 0)) / dt));
+    // "command" is left out because the dashboard's own calls land there; "getmore" because replica-set nodes tailing the oplog fill it.
+    const readRate = rate('query');
+    const writeRate = rate('insert') + rate('update') + rate('delete');
+
+    const { databases = [] } = await admin.command({ listDatabases: 1 });
+    const dbRows = [];
+    const collRows = [];
+    const SYSTEM = ['admin', 'local', 'config'];
+    for (const d of databases) {
+      const db = client.db(d.name);
+      const st = await db.command({ dbStats: 1 }).catch(() => ({}));
+      dbRows.push({ db: SYSTEM.includes(d.name) ? `${d.name} (system)` : d.name, system: SYSTEM.includes(d.name), collections: st.collections ?? 0, objects: st.objects ?? 0, dataSize: st.dataSize ?? 0, storageSize: st.storageSize ?? 0, indexSize: st.indexSize ?? 0 });
+      if (SYSTEM.includes(d.name)) continue; // system collections stay out of the collection list
+      for (const c of await db.listCollections({}, { nameOnly: true }).toArray()) {
+        const cs = await db.command({ collStats: c.name }).catch(() => null);
+        if (cs) collRows.push({ ns: `${d.name}.${c.name}`, docs: cs.count ?? 0, size: cs.size ?? 0, indexes: cs.nindexes ?? 0, indexSize: cs.totalIndexSize ?? 0 });
+      }
+    }
+    for (const d of dbRows) d.children = d.system ? [] : collRows.filter((c) => c.ns.startsWith(`${d.db}.`)).sort((a, b) => b.size - a.size);
+    const sum = (a, f) => a.reduce((x, r) => x + f(r), 0);
+    const cur = Math.max(0, (s2.connections?.current ?? 0) - OWN); // don't count the dashboard's own connection
+    const avail = (s2.connections?.available ?? 0) + OWN; // the dashboard's own sockets are not counted as used
+    const connPct = cur + avail ? (cur / (cur + avail)) * 100 : 0;
+    // Free (M0) clusters stop at 512 MB; set MONGO_LIMIT_MB if the cluster is on a bigger plan.
+    const limitMb = Number(process.env.MONGO_LIMIT_MB) || 512;
+    const usedBytes = sum(dbRows.filter((r) => !r.system), (r) => r.dataSize + r.indexSize);
+    const leftMb = Math.max(0, limitMb - usedBytes / 1e6);
+    const left = leftMb >= 100 ? `${Math.round(leftMb)} MB` : `${leftMb.toFixed(1)} MB`;
+    const k = (label, value, fmt, sub) => ({ label, value, fmt, delta: null, tone: 'neutral', spark: null, sub, empty: false, basis: 'previous' });
+    return {
+      health: { status: connPct > 90 ? 'crit' : connPct > 75 ? 'warn' : 'ok', note: `${cur} connections` },
+      kpis: [
+        k('Connections', cur, 'int', `${avail} available`),
+        k('Data size', sum(dbRows.filter((r) => !r.system), (r) => r.dataSize), 'bytes'),
+        k('Storage size', sum(dbRows.filter((r) => !r.system), (r) => r.storageSize), 'bytes', `${left} left of ${limitMb} MB`),
+        k('Index size', sum(dbRows.filter((r) => !r.system), (r) => r.indexSize), 'bytes'),
+        k('Databases', dbRows.filter((r) => !r.system).length, 'int'),
+        k('Collections', sum(dbRows, (r) => r.collections), 'int'),
+        k('Documents', sum(dbRows, (r) => r.objects), 'count'),
+      ],
+      widgets: [
+        { id: 'ops', type: 'toplist', title: 'Operations / sec by type', span: 6, unit: 'qps', items: opKeys.map((o) => ({ label: o, value: +rate(o).toFixed(2) })).sort((a, b) => b.value - a.value) },
+        { id: 'opsTotal', type: 'toplist', title: 'Operations since server start', span: 6, unit: 'count', items: opKeys.map((o) => ({ label: o, value: s2.opcounters?.[o] || 0 })).sort((a, b) => b.value - a.value) },
+        {
+          id: 'dbs', type: 'table', title: 'Databases', span: 12,
+          columns: [{ key: 'db', label: 'Database' }, { key: 'collections', label: 'Collections' }, { key: 'objects', label: 'Documents' }, { key: 'dataSize', label: 'Data', fmt: 'bytes' }, { key: 'storageSize', label: 'Storage', fmt: 'bytes' }, { key: 'indexSize', label: 'Indexes', fmt: 'bytes' }],
+          rows: dbRows,
+          expandChildren: true,
+          childColumns: [{ key: 'ns', label: 'Namespace' }, { key: 'docs', label: 'Documents' }, { key: 'size', label: 'Data', fmt: 'bytes' }, { key: 'indexes', label: 'Indexes' }, { key: 'indexSize', label: 'Index size', fmt: 'bytes' }],
+        },
+        {
+          id: 'colls', type: 'table', title: 'Collections', span: 12,
+          columns: [{ key: 'ns', label: 'Namespace' }, { key: 'docs', label: 'Documents' }, { key: 'size', label: 'Data', fmt: 'bytes' }, { key: 'indexes', label: 'Indexes' }, { key: 'indexSize', label: 'Index size', fmt: 'bytes' }],
+          rows: collRows.sort((a, b) => b.size - a.size),
+          expandDocs: true,
+        },
+      ],
+      alerts: [],
+    };
+  } finally {
+    await client.close().catch(() => {});
+  }
+}
+
+const SECRET_KEY = /pass(word)?|pwd|secret|token|api[-_]?key|private|authorization|cookie|session/i;
+/** Deep copy with anything that looks like a credential masked. */
+function mask(v) {
+  if (Array.isArray(v)) return v.map(mask);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, SECRET_KEY.test(k) ? '••••••' : mask(x)]));
+  return v;
+}
+
+/** Documents of one collection (newest _id first, up to 5000), read-only, credentials masked. */
+export async function documents(creds, ns, limit = 20) {
+  const uri = String(creds?.connectionString || '').trim();
+  if (!/^mongodb(\+srv)?:\/\/[^\s]+$/.test(uri)) throw new Error('MongoDB is not connected');
+  const dot = String(ns).indexOf('.');
+  const dbName = String(ns).slice(0, dot);
+  const coll = String(ns).slice(dot + 1);
+  if (dot < 1 || !coll || !/^[\w.-]+$/.test(dbName) || !/^[\w.\-$]+$/.test(coll)) throw new Error('Bad collection name');
+  if (['admin', 'local', 'config'].includes(dbName)) throw new Error('System databases are not shown');
+  const n = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 5000); // hard cap so one click can't pull a huge collection
+  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 8000, connectTimeoutMS: 8000, appName: 'analytics-dashboard', maxPoolSize: 1, serverMonitoringMode: 'poll' });
+  try {
+    await client.connect().catch((e) => { throw new Error(explain(e)); });
+    const docs = await client.db(dbName).collection(coll).find({}).sort({ _id: -1 }).limit(n).toArray();
+    return { ns, total: await client.db(dbName).collection(coll).estimatedDocumentCount(), docs: docs.map((d) => mask(BSON.EJSON.serialize(d, { relaxed: true }))) };
+  } finally {
+    await client.close().catch(() => {});
+  }
+}
 
 export async function dashboard(range) {
   const tl = timeline(range);

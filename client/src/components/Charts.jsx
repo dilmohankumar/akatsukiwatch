@@ -92,7 +92,7 @@ function Legend({ widget, series, data, unit, colorOf, hot, setHot, sel, setSel,
     <div className="legend" onMouseLeave={() => setHot(null)}>
       {series.map((s, i) => {
         const vals = data.map((d) => d[s.key]);
-        const v = additive ? vals.reduce((a, b) => a + b, 0) : vals[vals.length - 1];
+        const v = widget.totals?.[s.key] ?? (additive ? vals.reduce((a, b) => a + b, 0) : vals[vals.length - 1]);
         const raw = widget.rawBy?.[s.key] ?? s.label;
         const active = canAct && hot === s.key;
         const on = canAct && filterApi.has(widget.filterField, raw);
@@ -114,7 +114,7 @@ function Legend({ widget, series, data, unit, colorOf, hot, setHot, sel, setSel,
             ) : (
               <>
                 {' '}<b>{fmt(unit, v)}</b>
-                {!additive && series.length === 1 && <em> now</em>}
+                {!additive && series.length === 1 && widget.totals?.[s.key] == null && <em> now</em>}
               </>
             )}
           </span>
@@ -161,6 +161,7 @@ export default function TimeChart({ widget, range, stacked, filterApi }) {
   const emph = sel ?? hot; // what to emphasise: the clicked entry, else the hovered one
   const colorOf = (s, i) => widget.colors?.[s.key] || COLORS[i] || COLORS[COLORS.length - 1];
   const { ticks, meta, dayView } = useMemo(() => makeTicks(data), [data]);
+  const dense = data.length > 150; // hairline bars: a separator stroke would cover them completely
   const anim = { isAnimationActive: !animated, animationDuration: 900, animationEasing: 'ease-out', onAnimationEnd: () => setAnimated(true) };
 
   const axes = [
@@ -183,10 +184,10 @@ export default function TimeChart({ widget, range, stacked, filterApi }) {
         <div className="chart" role="img" aria-label={`${widget.title} chart`}>
           <ResponsiveContainer width="100%" height={250}>
             {stacked ? (
-              <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap="12%">
+              <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap={dense ? 0 : "12%"}>
                 {axes}
                 {series.map((s, i) => (sel && sel !== s.key ? null : (
-                  <Bar key={s.key} dataKey={s.key} stackId="a" fill={colorOf(s, i)} fillOpacity={emph && emph !== s.key ? 0.15 : 1} stroke="var(--surface)" strokeWidth={1} {...anim} />
+                  <Bar key={s.key} dataKey={s.key} stackId="a" fill={colorOf(s, i)} fillOpacity={emph && emph !== s.key ? 0.15 : 1} stroke="var(--surface)" strokeWidth={dense ? 0 : 1} {...anim} />
                 )))}
               </BarChart>
             ) : (

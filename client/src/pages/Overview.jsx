@@ -4,6 +4,7 @@ import { fmt, ago } from '../format.js';
 import { useSettings } from '../store.jsx';
 import { useData } from '../useData.js';
 import Icon from '../components/Icon.jsx';
+import LiveLogs from '../components/LiveLogs.jsx';
 
 const LABEL = { ok: 'Healthy', warn: 'Attention', crit: 'Critical' };
 
@@ -13,19 +14,17 @@ export default function Overview() {
   const { data, error } = useData(`ov:${ids}:${rangeKey}`, () => api.overview(enabled), [ids]);
 
   if (error && !data) return <div className="banner bad">Failed to load overview: {String(error.message)}</div>;
-  if (!data) return <div className="loading">Loading overview…</div>;
+  if (!data) return <div className="loading">Loading dashboard…</div>;
 
-  const worst = data.providers.reduce((w, p) => (p.health.status === 'crit' ? 'crit' : p.health.status === 'warn' && w !== 'crit' ? 'warn' : w), 'ok');
   const lc = data.logCounts;
 
   return (
     <div className="page">
       <div className="page-h">
         <div>
-          <h1>Overview</h1>
+          <h1>Dashboard</h1>
           <p>One screen for edge traffic, database, servers, payments, domains and logs.</p>
         </div>
-        <span className={`pill ${worst}`}>{worst === 'ok' ? 'All systems healthy' : worst === 'warn' ? 'Some systems need attention' : 'Critical issue detected'}</span>
       </div>
 
       {data.providers.length === 0 && (
@@ -34,7 +33,7 @@ export default function Overview() {
 
       <div className="tiles">
         {data.providers.map((p) => (
-          <Link key={p.id} to={`/p/${p.id}`} className="tile">
+          <Link key={p.id} to={`/p/${p.id}`} className={`tile tile-${p.id}`}>
             <div className="tile-h">
               <span className="tile-t"><Icon name={p.icon} /> {p.name}</span>
               <span className={`pill ${p.health.status}`}>{LABEL[p.health.status]}</span>
@@ -43,7 +42,7 @@ export default function Overview() {
             <div className="tile-k">
               {p.kpis.map((k) => (
                 <div key={k.label}>
-                  <b>{fmt(k.fmt, k.value)}</b>
+                  <b className="num">{fmt(k.fmt, k.value)}</b>
                   <span>{k.label}</span>
                 </div>
               ))}
@@ -76,7 +75,8 @@ export default function Overview() {
               </div>
             ))}
           </div>
-          <Link className="link" to="/p/docker">Open live logs →</Link>
+          <LiveLogs compact />
+          <Link className="link" to="/p/docker" style={{ display: 'inline-block', marginTop: 10 }}>Open all logs →</Link>
         </section>
       </div>
     </div>

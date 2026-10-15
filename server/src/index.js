@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { providers, getProvider, load } from './providers/index.js';
 import { windowOf, parseFilters } from './providers/cfCore.js';
 import * as logs from './logs.js';
+import * as mongodb from './providers/mongodb.js';
 
 const app = express();
 app.use(cors());
@@ -36,8 +37,17 @@ app.get('/api/dashboard/:id', async (req, res) => {
     return res.status(400).json({ error: e.message });
   }
   const win = winOf(req);
-  const data = await load(p, win, creds[p.meta.id], { tab: req.query.tab, filters: req.query.filters, groups: req.query.groups });
+  const data = await load(p, win, creds[p.meta.id], { tab: req.query.tab, filters: req.query.filters, groups: req.query.groups, intervals: req.query.intervals });
   res.json({ meta: p.meta, range: win.key, window: { start: win.start, end: win.end }, tab: req.query.tab || null, generatedAt: Date.now(), ...data });
+});
+
+// A collection's latest documents (read-only, credentials masked) for the MongoDB page.
+app.get('/api/mongodb/docs', async (req, res) => {
+  try {
+    res.json(await mongodb.documents(credsOf(req).mongodb, String(req.query.ns || ''), req.query.limit));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // Autocomplete values for the filter form.

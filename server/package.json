@@ -6,5 +6,9 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js"
   },
-  "dependencies": { "cors": "^2.8.5", "express": "^4.21.0" }
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "mongodb": "~7.7.0"
+  }
 }

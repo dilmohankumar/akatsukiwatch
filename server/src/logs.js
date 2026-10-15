@@ -55,6 +55,7 @@ function push(ev) {
 }
 
 export function start() {
+  if (process.env.DEMO_LOGS !== '1') return; // no invented log lines unless explicitly asked for
   const r = rng(hash('seed-logs'));
   for (let i = 0; i < 60; i++) {
     const ev = make(r);

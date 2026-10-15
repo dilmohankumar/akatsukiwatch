@@ -21,6 +21,7 @@ export const loadCreds = () => read('opswatch.creds', {});
 export const loadRange = () => ({ range: read('opswatch.range', '24h'), custom: read('opswatch.custom', null) });
 const ALL = ['cloudflare', 'mongodb', 'ec2', 'payments', 'domains', 'docker'];
 
+export const LIVE_MS = 15000;
 const Ctx = createContext(null);
 export const useSettings = () => useContext(Ctx);
 
@@ -30,6 +31,20 @@ export function SettingsProvider({ children }) {
   const [theme, setTheme] = useState(() => read('opswatch.theme', 'system'));
   const [enabled, setEnabled] = useState(() => read('opswatch.enabled', ALL));
   const [creds, setCreds] = useState(loadCreds);
+  // Live: one shared timer. `tick` goes up every LIVE_MS; `nextAt` is when the next refresh happens (for the countdown).
+  const [tick, setTick] = useState(0);
+  const [nextAt, setNextAt] = useState(() => Date.now() + LIVE_MS);
+  useEffect(() => {
+    if (!auto) return undefined;
+    setNextAt(Date.now() + LIVE_MS);
+    // turning Live on refreshes right away
+    setTick((t) => t + 1);
+    const id = setInterval(() => {
+      setTick((t) => t + 1);
+      setNextAt(Date.now() + LIVE_MS);
+    }, LIVE_MS);
+    return () => clearInterval(id);
+  }, [auto]);
 
   useEffect(() => write('opswatch.auto', auto), [auto]);
   useEffect(() => write('opswatch.enabled', enabled), [enabled]);
@@ -60,5 +75,5 @@ export function SettingsProvider({ children }) {
 
   const toggle = (id) => setEnabled((e) => (e.includes(id) ? e.filter((x) => x !== id) : [...e, id]));
 
-  return <Ctx.Provider value={{ range, custom: sel.custom, rangeKey, setRangeSel, auto, setAuto, theme, setTheme, enabled, toggle, creds, saveCreds }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ range, custom: sel.custom, rangeKey, setRangeSel, auto, setAuto, tick, nextAt, theme, setTheme, enabled, toggle, creds, saveCreds }}>{children}</Ctx.Provider>;
 }

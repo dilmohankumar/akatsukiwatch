@@ -81,6 +81,25 @@ export function tline(win) {
   return { dim, step, windowMs: win.dur, start: win.start, end: win.end, ts, bucket: (v) => Math.floor(tsOf(v) / step) * step };
 }
 
+// ---- "Interval" menu (bar charts): Auto / 15 minutes / 1 hour / 1 day --------------------------------
+export const INTERVALS = { '15m': ['datetimeFifteenMinutes', 900e3], '1h': ['datetimeHour', 3600e3], '1d': ['date', 864e5] };
+export const INTERVAL_OPTIONS = [{ id: 'auto', label: 'Auto' }, { id: '15m', label: '15 minutes' }, { id: '1h', label: '1 hour' }, { id: '1d', label: '1 day' }];
+export function tlineWith(win, dim, step) {
+  const ts = [];
+  for (let t = Math.floor(win.start / step) * step; t <= win.end; t += step) ts.push(t);
+  const tsOf = (v) => (dim === 'date' ? Date.parse(`${v}T00:00:00Z`) : Date.parse(v));
+  return { dim, step, windowMs: win.end - win.start, start: win.start, end: win.end, ts, bucket: (v) => Math.floor(tsOf(v) / step) * step };
+}
+export function parseIntervals(json) {
+  if (!json) return {};
+  try {
+    const g = JSON.parse(json);
+    return Object.fromEntries(Object.entries(g || {}).filter(([k, v]) => /^[a-z]{1,12}$/.test(k) && INTERVALS[v]).slice(0, 6));
+  } catch {
+    return {};
+  }
+}
+
 // ---- display names -----------------------------------------------------------------------------
 const regions = new Intl.DisplayNames(['en'], { type: 'region' });
 const COUNTRY_OVERRIDE = { KR: 'Korea, South' }; // the dashboard uses this spelling
