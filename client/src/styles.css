@@ -396,3 +396,15 @@ h2.sect { font-size: 16px; margin: 12px 0 -4px; letter-spacing: -0.01em; }
 @keyframes eye-spin { to { transform: rotate(360deg); } }
 @keyframes eye-blink { 0%, 90%, 100% { transform: scaleY(1); } 94% { transform: scaleY(.04); } }
 @media (prefers-reduced-motion: reduce) { .eye, .eye-spin, .eye-blink { animation-duration: 8s; } }
+/* Print / PDF report: only the page content, on white paper */
+@media print {
+  .side, .topbar, .no-print, .tabrow, .row-act, .chips { display: none !important; }
+  .app, body { display: block !important; background: #fff !important; }
+  .main { padding: 0 !important; }
+  .card, .kpi, .tile { break-inside: avoid; box-shadow: none !important; }
+  .grid { display: block !important; }
+  .grid > * { margin-bottom: 12px; }
+  .kpis { grid-template-columns: repeat(3, 1fr) !important; }
+  .stale-wrap { opacity: 1 !important; }
+  .docs { max-height: none !important; overflow: visible !important; }
+}

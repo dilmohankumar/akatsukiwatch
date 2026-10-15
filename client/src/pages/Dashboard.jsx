@@ -124,6 +124,7 @@ export default function Dashboard({ providers }) {
             {data.health && id !== 'cloudflare' && <span className={`pill ${data.health.status}`}>{{ ok: 'Healthy', warn: 'Attention', crit: 'Critical' }[data.health.status]} · {data.health.note}</span>}
             {data.source === 'live' && <span className="pill ok">Live data</span>}
             {loading && <span className="pill neutral">refreshing…</span>}
+            <button type="button" className="btn sm no-print" onClick={() => window.print()}>Print / PDF report</button>
           </div>
         )}
       </div>
