@@ -85,7 +85,7 @@ app.post('/api/connect/test', (req, res) => {
   const { provider, creds } = req.body || {};
   const p = getProvider(provider);
   if (!p) return res.status(404).json({ ok: false, message: 'unknown provider' });
-  const missing = p.meta.credentialFields.filter((f) => !creds?.[f.key]).map((f) => f.label);
+  const missing = p.meta.credentialFields.filter((f) => !f.optional && !creds?.[f.key]).map((f) => f.label);
   if (missing.length) return res.json({ ok: false, message: `Missing: ${missing.join(', ')}` });
   if (process.env.DATA_MODE !== 'demo' && p.testConnection) {
     return p.testConnection(creds).then((m) => res.json(m)).catch((e) => res.json({ ok: false, message: e.message }));

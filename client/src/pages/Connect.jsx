@@ -11,7 +11,7 @@ function Card({ p }) {
 
   const submit = (e) => {
     e.preventDefault();
-    const missing = p.credentialFields.filter((f) => !String(vals[f.key] || '').trim()).map((f) => f.label);
+    const missing = p.credentialFields.filter((f) => !f.optional && !String(vals[f.key] || '').trim()).map((f) => f.label);
     if (missing.length) return setMsg({ ok: false, message: `Missing: ${missing.join(', ')}` });
     saveCreds(p.id, Object.fromEntries(Object.entries(vals).map(([k, v]) => [k, String(v).trim()])));
     setMsg({ ok: true, message: 'Saved.' });
